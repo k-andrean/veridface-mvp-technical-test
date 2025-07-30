@@ -64,6 +64,35 @@ def save_to_airtable(fields, log_table=False):
     print("📥 Airtable Response:", res.status_code, res.text)
     return res.json()
 
+
+def get_existing_users():
+    url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_NAME}"
+    headers = {"Authorization": f"Bearer {AIRTABLE_PAT}"}
+    users = []
+
+    offset = None
+    while True:
+        params = {"pageSize": 100}
+        if offset:
+            params["offset"] = offset
+        res = requests.get(url, headers=headers, params=params)
+        data = res.json()
+        for record in data.get("records", []):
+            encoding_encrypted = record["fields"].get("FaceEncoding")
+            if encoding_encrypted:
+                try:
+                    encoding_bytes = cipher.decrypt(encoding_encrypted.encode())
+                    encoding = np.frombuffer(encoding_bytes, dtype=np.float64)
+                    users.append((record["id"], encoding))
+                except Exception as e:
+                    print("⚠️ Skipping invalid encoding:", e)
+
+        offset = data.get("offset")
+        if not offset:
+            break
+    return users  
+    
+
 # Register endpoint
 @app.route('/register', methods=['POST'])
 def register_user():
@@ -74,6 +103,17 @@ def register_user():
 
         if not encodings:
             return jsonify({"status": "fail", "message": "No face detected"}), 400
+
+        # Check if face already registered
+        # existing_users = get_existing_users()  # should return list of (user_id, decrypted_encoding)
+        # for user_id, stored_encoding in existing_users:
+        #     match = face_recognition.compare_faces([stored_encoding], encodings[0], tolerance=0.45)[0]
+        #     if match:
+        #         return jsonify({
+        #             "status": "fail",
+        #             "message": "Face already registered",
+        #             "user_id": user_id
+        #         }), 409
 
         encrypted_encoding = cipher.encrypt(encodings[0].tobytes()).decode()
         digital_id = generate_digital_id()
@@ -142,7 +182,7 @@ def scan_face():
         today_end = now_jakarta.replace(hour=23, minute=59, second=59, microsecond=999999).astimezone(pytz.utc).isoformat().replace("+00:00", "Z")
 
         log_table_url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_LOGS_TABLE_NAME}"
-        log_query = {"filterByFormula": f"AND("f"{{user_id}} = '{user_id}',"f"{{event}} = '{data.get('event', 'Tech Conference')}',"f"IS_AFTER({{timestamp}}, '{today_start}'),"f"IS_BEFORE({{timestamp}}, '{today_end}')"f")"}
+        log_query = {"filterByFormula": f"AND("f"{{user_id}} = '{user_id}',"f"{{event}} = '{data.get('event', 'BIL Workshop Room')}',"f"IS_AFTER({{timestamp}}, '{today_start}'),"f"IS_BEFORE({{timestamp}}, '{today_end}')"f")"}
         log_res = requests.get(log_table_url, headers=headers, params=log_query).json()
         already_logged = log_res.get("records", [])
 
